@@ -32,7 +32,11 @@ async function run() {
     const trainerCollection = client.db("WellTrackr").collection("trainers");
     const forumCollection = client.db("WellTrackr").collection("forums");
     const reviewCollection = client.db("WellTrackr").collection("review");
-    const appliedTrainerCollection = client.db("WellTrackr").collection("appliedTrainers");
+    const appliedTrainerCollection = client
+      .db("WellTrackr")
+      .collection("appliedTrainers");
+    const plansCollection = client.db("WellTrackr").collection("plans");
+    const addClassCollection = client.db("WellTrackr").collection("addClass");
 
     // jwt related api
     app.post("/jwt", async (req, res) => {
@@ -43,8 +47,8 @@ async function run() {
       res.send({ token: token });
     });
 
-     // Middleware to verify JWT token
-     const verifyToken = (req, res, next) => {
+    // Middleware to verify JWT token
+    const verifyToken = (req, res, next) => {
       try {
         const authorizationHeader = req.headers.authorization;
         if (!authorizationHeader || typeof authorizationHeader !== "string") {
@@ -60,7 +64,7 @@ async function run() {
         return res.status(401).send({ message: "Unauthorized request" });
       }
     };
-    
+
     // Middleware to verify admin access
     const verifyAdmin = async (req, res, next) => {
       try {
@@ -129,7 +133,6 @@ async function run() {
       res.send(result);
     });
 
-    
     //review related api
     app.get("/api/v1/review", async (req, res) => {
       const result = await reviewCollection.find().toArray();
@@ -201,24 +204,6 @@ async function run() {
       } catch (error) {
         console.error(error);
         return res.status(500).send({ message: "Internal server error" });
-      }
-    });
-
-    // Route to post data to appliedTrainers collection
-    app.post("/api/v1/appliedTrainers", async (req, res) => {
-      try {
-        // Assuming that req.body contains the data you want to add
-        const newData = req.body;
-
-        // Insert the data into the appliedTrainers collection
-        const result = await appliedTrainerCollection.insertOne(newData);
-
-        // Respond with a success message
-        res.status(201).send({ message: "Data added to appliedTrainers collection", result });
-      } catch (error) {
-        // Handle any errors that occur during the insertion
-        console.error(error);
-        res.status(500).send({ message: "Error adding data to appliedTrainers collection" });
       }
     });
 
@@ -308,6 +293,53 @@ async function run() {
       }
     });
 
+    // Route to post data to appliedTrainers collection
+    app.post("/api/v1/appliedTrainers", async (req, res) => {
+      try {
+        // Assuming that req.body contains the data you want to add
+        const newData = req.body;
+
+        // Insert the data into the appliedTrainers collection
+        const result = await appliedTrainerCollection.insertOne(newData);
+
+        // Respond with a success message
+        res.status(201).send({
+          message: "Data added to appliedTrainers collection",
+          result,
+        });
+      } catch (error) {
+        // Handle any errors that occur during the insertion
+        console.error(error);
+        res
+          .status(500)
+          .send({ message: "Error adding data to appliedTrainers collection" });
+      }
+    });
+
+    // API endpoint to get all applied trainers
+    app.get("/api/v1/appliedTrainers", async (req, res) => {
+      try {
+        // Fetch all applied trainers from the collection
+        const appliedTrainers = await appliedTrainerCollection.find().toArray();
+        res.status(200).send(appliedTrainers);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
+    // API endpoint to get all plans
+    app.get("/api/v1/plans", async (req, res) => {
+      try {
+        // Fetch all plans from the collection
+        const plans = await plansCollection.find().toArray();
+        res.status(200).send(plans);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
     // Fetch forum posts with pagination
     app.get("/api/v1/forums", async (req, res) => {
       try {
@@ -356,7 +388,27 @@ async function run() {
         res.status(400).send(error);
       }
     });
-    
+    // API endpoint to post forum data
+    app.post("/api/v1/forums", async (req, res) => {
+      try {
+        const forumData = req.body;
+        // You can add createdAt here using server time if needed
+        // forumData.createdAt = new Date().toISOString();
+
+        // Insert the forum data into the forumCollection
+        const result = await forumCollection.insertOne(forumData);
+
+        // Respond with a success message and the inserted forum data
+        res.status(201).send({
+          message: "Forum data added successfully",
+          data: result.ops[0],
+        });
+      } catch (error) {
+        // Handle any errors that occur during the insertion
+        console.error(error);
+        res.status(500).send({ message: "Error adding forum data" });
+      }
+    });
   } finally {
     // Uncomment the following line if you want to close the connection after each operation
     // await client.close();
