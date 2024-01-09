@@ -1,6 +1,7 @@
 const express = require("express");
 const app = express();
 require("dotenv").config();
+const SSLCommerzPayment = require("sslcommerz-lts")
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
@@ -22,6 +23,12 @@ const client = new MongoClient(uri, {
   serverApi: ServerApiVersion.v1,
 });
 
+
+const store_id = process.env.STORE_ID;
+const store_passwd = process.env.STORE_PASS;
+const is_live = false //true for live, false for sandbox
+
+
 async function run() {
   try {
     await client.connect();
@@ -37,6 +44,7 @@ async function run() {
       .collection("appliedTrainers");
     const plansCollection = client.db("WellTrackr").collection("plans");
     const addClassCollection = client.db("WellTrackr").collection("addClass");
+    const paymentPlansCollection = client.db("WellTrackr").collection("paymentPlans");
 
     // jwt related api
     app.post("/jwt", async (req, res) => {
@@ -55,7 +63,7 @@ async function run() {
           return res.status(401).send({ message: "Unauthorized request" });
         }
         const token = authorizationHeader.split(" ")[1];
-        console.log("Received token:", token);
+        // console.log("Received token:", token);
         const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
         req.user = decoded;
         next();
@@ -101,10 +109,10 @@ async function run() {
 
     app.post("/api/v1/users", async (req, res) => {
       const query = { email: req.body.email };
-      console.log(55, req.body.email);
+      // console.log(55, req.body.email);
       const existingUser = await userCollection.findOne(query);
       if (existingUser) {
-        console.log(58, existingUser);
+        // console.log(58, existingUser);
         res.send({ message: "user already exists", insertedId: null });
       } else {
         const newUser = req.body;
@@ -221,7 +229,7 @@ async function run() {
     // );
 
     app.get("/users/admin/:email", verifyAdmin, async (req, res) => {
-      console.log(202, req.params, req?.decoded?.email);
+      // console.log(202, req.params, req?.decoded?.email);
       const email = req?.params?.email;
       if (email !== req?.user?.email) {
         return res.status(403).send({ message: "Unauthorized request" });
@@ -409,6 +417,276 @@ async function run() {
         res.status(500).send({ message: "Error adding forum data" });
       }
     });
+
+    //addClassCollection get method
+    app.get("/api/v1/addClass", async (req, res) => {
+      const result = await addClassCollection.find().toArray();
+      res.send(result);
+    });
+    //addClassCollection post method
+    app.post("/api/v1/addClass", async (req, res) => {
+      
+        const addClassData = req.body;
+        
+        const result = await addClassCollection.insertOne(addClassData);
+        res.send(result);
+    })
+
+    // put method
+
+    app.put("/api/v1/addClass/:id", async (req, res) => {
+     
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      
+      // Validate if the request body contains the necessary fields
+      const { name, category, yearsOfExperience, availableHours, image, facebook, twitter, linkedin, description, time } = req.body;
+      // console.log("443:Request Body:", req.body);
+      
+        const result = await addClassCollection.updateOne(query, {
+          $set: req.body,
+        });
+    
+        if (result.modifiedCount === 0) {
+          return res.status(404).send({ message: "Class not found for the provided ID." });
+        }
+    
+        // Send back a more informative response, e.g., the updated document
+        const updatedClass = await addClassCollection.findOne(query);
+      res.send(updatedClass);
+    });
+    
+
+// admin
+app.patch(
+  "/api/v1/users/make-admin/:id",
+  verifyToken,
+  verifyAdmin,
+  async (req, res) => {
+    const userId = req.params.id;
+    const filter = { _id: new ObjectId(userId) };
+    const updatedDoc = { $set: { role: "admin" } };
+
+    try {
+      const result = await userCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    } catch (error) {
+      console.error("Error making user admin:", error);
+      res.status(500).send("Internal Server Error");
+    }
+  }
+);
+
+app.patch(
+  "/api/v1/users/make-agent/:id",
+  verifyToken,
+  verifyAdmin,
+  async (req, res) => {
+    const userId = req.params.id;
+    // console.log(356, userId);
+    const filter = { _id: new ObjectId(userId) };
+    const updatedDoc = { $set: { role: "trainer" } };
+
+    try {
+      const result = await userCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    } catch (error) {
+      console.error("Error making user agent:", error);
+      res.status(500).send("Internal Server Error");
+    }
+  }
+);
+
+app.delete("/api/v1/users/:id", async (req, res) => {
+  const id = req.params.id;
+  const query = { _id: new ObjectId(id) };
+  try {
+    const result = await userCollection.deleteOne(query);
+    res.send(result);
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+//payment
+const tran_id = new ObjectId().toString();
+
+function generateRandomNumberString(length) {
+  const numbers = '0123456789';
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    const randomIndex = Math.floor(Math.random() * numbers.length);
+    result += numbers.charAt(randomIndex);
+  }
+  return result;
+}
+
+const NID = generateRandomNumberString(12);
+//payment get
+app.get("/payment", async (req, res) => {
+  const payment = await paymentPlansCollection.find().toArray();
+  res.send(payment);
+});
+// app.post("/payment", async (req, res) => {
+//   try {
+//     const product = await plansCollection.findOne({ _id: new ObjectId(req.body.planId) });
+
+//     console.log("Product:", product);
+//     const data = {
+//       total_amount: product?.price,
+//       currency: 'BDT',
+//       tran_id: tran_id,
+//       success_url: 'http://localhost:3030/success',
+//       fail_url: 'http://localhost:3030/fail',
+//       cancel_url: 'http://localhost:3030/cancel',
+//       ipn_url: 'http://localhost:3030/ipn',
+//       shipping_method: 'Courier',
+//       product_name: product?.name,
+//       product_category: product?._id,
+//       product_profile: product?.description,
+//       cus_name: 'Customer Name',
+//       cus_email: 'customer@example.com',
+//       cus_add1: 'Dhaka',
+//       // Add other customer details
+//       nid_number: NID,
+//       ship_name: 'Customer Name',
+//       // Add other shipping details
+//       // receivedData: req.body,
+//     };
+
+//     console.log("Payment data:", data);
+
+//     const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live);
+//     const apiResponse = await sslcz.init(data);
+
+//     let GatewayPageURL = apiResponse.GatewayPageURL;
+
+//     const finalOrder = {
+//       paidStatus: false,
+//       transactionId: tran_id,
+//       userEmail: req.body.userEmail,
+//       userName: req.body.userName,
+//       planName: product?.name,
+//       planPrice: product?.price,
+//       planDescription: product?.description,
+//     };
+//     console.log("Final Order:", finalOrder);
+
+//     const result = await paymentPlansCollection.insertOne(finalOrder);
+//     res.send({ url: GatewayPageURL });
+//     console.log("Redirecting to: ", GatewayPageURL);
+//   } catch (error) {
+//     console.error("Error processing payment:", error);
+//     res.status(500).send({ error: "Internal Server Error" });
+//   }
+// });
+
+app.post("/payment", async (req, res) => {
+    const order = await plansCollection.findOne({
+      _id: new ObjectId(req.body.planId),
+    });
+      // console.log("589: Order:", order);
+
+     if(!order){
+       return res.status(404).send({message: "Order not found"});
+     }
+
+     const pay = req.body;
+    //  console.log("596: Pay:", pay);
+
+     const data = {
+      total_amount: order.price || 0, // Set total_amount dynamically based on property price
+      currency: "BDT",
+      tran_id: tran_id, // use unique tran_id for each api call
+      success_url: `http://localhost:5000/payment/success/${tran_id}`,
+      fail_url: `http://localhost:5000/payment/fail/${tran_id}`,
+      cancel_url: `http://localhost:5000/payment/cancel/${tran_id}`,
+      ipn_url: "http://localhost:5000/ipn",
+      shipping_method: "Courier",
+      product_name: order.name,
+      product_category: "Electronic",
+      product_profile: "general",
+      cus_name: pay.userName,
+      cus_email: pay.userEmail,
+      cus_NID: NID,
+      plan_id: pay.planId,
+      cus_city: "Dhaka",
+      cus_state: "Dhaka",
+      cus_postcode: "1000",
+      cus_country: "Bangladesh",
+      cus_phone: "01711111111",
+      cus_fax: "01711111111",
+      ship_name: "Customer Name",
+      ship_add1: "Dhaka",
+      ship_add2: "Dhaka",
+      ship_city: "Dhaka",
+      ship_state: "Dhaka",
+      ship_postcode: 1000,
+      ship_country: "Bangladesh",
+    };
+
+    console.log("Data:", data);
+
+    const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live)
+    sslcz.init(data).then(apiResponse => {
+        // Redirect the user to payment gateway
+        let GatewayPageURL = apiResponse.GatewayPageURL
+        res.send({ url: GatewayPageURL })
+
+        const finalOrder = {
+          transactionId: tran_id,
+          plan_id: pay.planId,
+          userEmail: pay.userEmail,
+          userName: pay.userName,
+          planName: order.name,
+          planPrice: order.price,
+          userNID: NID,
+          paidStatus: false,
+        };
+        const result = paymentPlansCollection.insertOne(finalOrder);
+        console.log('Redirecting to: ', GatewayPageURL)
+    });
+
+    app.post("/payment/success/:tranId", async (req, res) => {
+      console.log("Payment success:", req.params.tranId);
+      const result = await paymentPlansCollection.updateOne(
+        { transactionId: req.params.tranId },
+        {
+          $set: {
+            paidStatus: true,
+            successDate: new Date(),
+          },
+        }
+      );
+      if (result.modifiedCount > 0) {
+        res.redirect(
+          `http://localhost:5173/payment/success/${req.params.tranId}`
+        );
+      } else {
+        res.send("Payment failed");
+      }
+    });
+    app.post("/payment/fail/:tranId", async (req, res) => {
+      const result = await paymentPlansCollection.deleteOne({
+        transactionId: req.params.tranId,
+      });
+
+      if (result.deletedCount) {
+        res.redirect(
+          `http://localhost:5173/payment/fail/${req.params.tranId}`
+        );
+      } else {
+        res.send("Payment failed");
+      }
+    });
+
+
+})
+
+
+
+
   } finally {
     // Uncomment the following line if you want to close the connection after each operation
     // await client.close();
